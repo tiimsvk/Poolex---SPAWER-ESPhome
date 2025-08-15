@@ -1,0 +1,317 @@
+#-------------------------------------------
+# REVISION
+#-------------------------------------------
+# 2025.08.1.0.0 - inicialized version
+
+#-------------------------------------------
+# SUBTITUTIONS - basic definitions and description of the device
+#-------------------------------------------
+substitutions:
+  device_name:        "heat-pump"
+  created_by:         "StudioTiiM 2025"
+  device_description: "Heat pump Poolex SPAWER 3kW"
+
+#-------------------------------------------
+# DEFINE PINS AND VARIABILES
+# CIRCUIT AND MODULES - basic definitions and description of the device
+#-------------------------------------------
+# ----- MCU -----
+  # Module: ESP32-C3 super mini
+  
+# ------ MODULES ---
+ # ----- LEDS ------
+  # Modul: on borad blue led 
+  status_led_pin: GPIO08
+  
+#-------------------------------------------
+# PROTOCOLS
+#-------------------------------------------
+ # ----- PROTOCOLS PINS -----
+  # I2C
+  #i2c_sda: GPIO04
+  #i2c_scl: GPIO05
+    
+  # uart
+  uart_rx_pin: GPIO05
+  uart_tx_pin: GPIO06
+
+ # ----- PROTOCOLS SETTINGS -----
+uart:
+  - id:         uart_tuya
+    tx_pin:    $uart_tx_pin
+    rx_pin:    $uart_rx_pin
+    baud_rate:  9600
+
+tuya:
+  uart_id: uart_tuya
+ # DATAPOINT
+ # 1   Switch
+ # 2   Mode
+ # 4   Temp Set
+ # 7   Defrost
+ # 15  Fault
+
+ # 17  Work state
+ # 23  Coiler Temp
+ # 24  Venting Temp
+ # 26  Around Temp
+ # 27  Compressor state
+ # 28  Four_valve state
+ # 29  Draught_fan state
+ # 30  Pump state
+ # 32  Ele_heating state
+ # 33  Defrost state
+ # 16  Temp current-℉
+ # 102 EEV Steps
+ # 103 Manual electric heat
+ # 104 Manual water pump
+ # 108 Antifreeze
+  
+#-------------------------------------------
+# ESPHOME PLATFORM SETTINGS
+#-------------------------------------------
+esphome:
+  name:      ${device_name}
+  project:
+    name:    "studiotiim.heat_pump"
+    version:  2025.08.1.0.0
+
+#-------------------------------------------
+# ESP MCU SETTINGS
+#-------------------------------------------
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP_BROWNOUT_DET: "n"
+
+# Enable logging
+logger:
+
+#-------------------------------------------
+# ETHERNET
+#-------------------------------------------
+wifi:
+  ssid:        !secret wifi_ssid
+  password:    !secret wifi_password
+  manual_ip:
+    static_ip:  !secret ip_heat_pump
+    gateway:    192.168.31.1
+    subnet:     255.255.255.0 
+  fast_connect: True
+  ap:
+    ssid:      "hotspot heat-pool"
+    password:  "passheatpool"
+
+#-------------------------------------------
+# STATUS LED
+# (boot/error/wifi conneted)
+#-------------------------------------------
+status_led:
+  pin:
+    number: $status_led_pin
+    #inverted: true
+    
+captive_portal:
+api:
+ota:
+  platform: esphome
+
+#-------------------------------------------
+# SENSORS
+#-------------------------------------------
+sensor:
+  #-------------------------------------------
+  # Wifi signal component
+  #-------------------------------------------
+  - platform:              wifi_signal
+    name:                 "Signal"
+    id:                   "wifisignal"
+    update_interval:       60s
+    
+#-------------------------------------------
+# TUYA DATAPOINTS
+#-------------------------------------------
+  # 16  Temp current-℉
+  - platform:             "tuya"
+    name:                  Temperature - Current
+    device_class:          temperature
+    unit_of_measurement: "°C"
+    sensor_datapoint:      16
+    #accuracy_decimals:     1
+    filters:
+      - multiply:          0.1
+
+  # 23  Coiler Temp
+  - platform:             "tuya"
+    name:                  Temperature - Coiler
+    device_class:          temperature
+    unit_of_measurement: "°C"
+    sensor_datapoint:      23
+    #accuracy_decimals:     1
+    filters:
+      - multiply:          0.1
+
+  # 24  Venting Temp
+  - platform:             "tuya"
+    name:                  Temperature - Venting
+    device_class:          temperature
+    unit_of_measurement: "°C"
+    sensor_datapoint:      24
+    #accuracy_decimals:     1
+    filters:
+      - multiply:          0.1
+
+  # 26  Around Temp
+  - platform:             "tuya"
+    name:                  Temperature - Around
+    device_class:          temperature
+    unit_of_measurement: "°C"
+    sensor_datapoint:      26
+    #accuracy_decimals:     1
+    filters:
+      - multiply:          0.1
+
+  # 17
+  - platform:             "tuya"
+    name:                  State - Work
+    sensor_datapoint:      17
+
+  # 102 EEV Steps
+  - platform:             "tuya"
+    name:                  EEV Control
+    sensor_datapoint:      102
+    unit_of_measurement:  "steps"
+    
+  - platform: tuya
+    id: fault_bits
+    name: "Fault code bits"
+    sensor_datapoint: 15
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            uint16_t f = (uint16_t) id(fault_bits).state;
+            std::vector<std::string> faults;
+
+            if (f & 0x0080) faults.push_back("E00 Ambient temp too high/low");
+            if (f & 0x0001) faults.push_back("E01 Inlet water temp sensor failure");
+            if (f & 0x0002) faults.push_back("E02 Ambient temp sensor failure");
+            if (f & 0x0004) faults.push_back("E03 Too high discharge gas temp");
+            if (f & 0x0008) faults.push_back("E04 Discharge temp sensor failure");
+            if (f & 0x0010) faults.push_back("E05 Coil temp sensor failure");
+            if (f & 0x0020) faults.push_back("EL Low pressure protection");
+            if (f & 0x0040) faults.push_back("EH High pressure protection");
+            if (f & 0x0100) faults.push_back("E06 Water flow protection");
+
+            std::string msg;
+            if (!faults.empty()) {
+              for (size_t i = 0; i < faults.size(); i++) {
+                if (i > 0) msg += "; ";
+                msg += faults[i];
+              }
+            } else {
+              msg = "No fault";
+            }
+            id(fault_text).publish_state(msg);
+
+text_sensor:
+  - platform: template
+    id: fault_text
+    name: "Fault description"
+            
+#text_sensor:
+#  # 15  Fault
+#  - platform:              tuya
+#    name:                  Fault
+#    sensor_datapoint:      15
+    
+binary_sensor:
+  # 27  Compressor state
+  - platform:              tuya
+    name:                  State - Compressor
+    sensor_datapoint:      27
+
+  # 28  Four_valve state
+  - platform:              tuya
+    name:                  State - Four valve
+    sensor_datapoint:      28
+
+  # 29  Draught_fan state
+  - platform:              tuya
+    name:                  State - Draught fan
+    sensor_datapoint:      29
+
+  # 30  Pump state
+  - platform:              tuya
+    name:                  State - Pump state
+    sensor_datapoint:      30
+
+  # 32  Ele_heating state
+  - platform:              tuya
+    name:                  State - Ele_heating
+    sensor_datapoint:      32
+
+  # 33  Defrost state
+  - platform:              tuya
+    name:                  State - Defrost
+    sensor_datapoint:      33
+ 
+#-------------------------------------------
+# SWITCHES
+#------------------------------------------- 
+switch:
+  # 1   Switch
+  - platform:              tuya
+    name:                  Power
+    switch_datapoint:      1
+  # 7   Defrost
+  - platform:              tuya
+    name:                  Defrost
+    switch_datapoint:      7
+    
+  # 103 Manual electric heat
+  - platform:              tuya
+    name:                  Manual electric heat
+    switch_datapoint:      103
+    
+  # 104 Manual water pump
+  - platform:              tuya
+    name:                  Manual water pump
+    switch_datapoint:      104
+    
+  # 108 Antifreeze
+  - platform:              tuya
+    name:                  Antifreeze
+    switch_datapoint:      108
+    
+#-------------------------------------------
+# NUMBERS
+#------------------------------------------- 
+number:
+  # 4   Temp Set
+  - platform:            "tuya"
+    name:                 Target_temp
+    device_class:         temperature
+    unit_of_measurement: "°C"
+    number_datapoint:     4
+    min_value:            3.00
+    max_value:           40.00
+    step:                 1
+    multiply:             10
+    #on_value:
+    #  then:
+    #    - lambda:         return x / 10.0;
+
+# Current mode.
+select:
+  # 2   Mode
+  - platform: "tuya"
+    name: Mode
+    enum_datapoint: 2
+    optimistic: false
+    options:
+      0: "Automatic"
+      1: "Heating"
+      2: "Boost Coolig"
