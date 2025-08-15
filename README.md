@@ -1,1 +1,2 @@
 [# Poolex-connected](https://github.com/andreondra/homeassistant-poolstar-poolex?tab=readme-ov-file) Source and connection
+in progress
